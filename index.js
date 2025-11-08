@@ -35,12 +35,12 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 async function fetchLatestPosts(url) {
   let browser;
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
+browser = await puppeteer.launch({
+  args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox"],
+  defaultViewport: chromium.defaultViewport,
+  executablePath: await chromium.executablePath(),
+  headless: "new", // 안정적인 모드
+});
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
