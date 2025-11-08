@@ -70,9 +70,8 @@ async function fetchLatestPosts(url) {
     await new Promise((r) => setTimeout(r, 2000));
 
     const posts = await page.evaluate(() => {
-      const links = Array.from(
-        document.querySelectorAll("a[href*='/ArticleRead.nhn'], a[href*='/articles/']")
-      );
+      // ✅ 현재 모바일 카페 구조 대응
+      const links = Array.from(document.querySelectorAll("a.link_board, a[href*='/articles/']"));
       return links.slice(0, 5).map((el) => ({
         title: el.innerText.trim(),
         link: el.href.startsWith("http")
