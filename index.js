@@ -3,12 +3,12 @@ import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import { execSync } from "child_process";
-import fs from "fs";
 
+// ==========================
+// 🌐 익스프레스 (서버 유지용)
+// ==========================
 const app = express();
 app.use(express.json());
-
-// 🧩 서버 유지용
 app.get("/", (req, res) => res.send("✅ Discord Bot is running"));
 app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 
@@ -16,15 +16,19 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 // 🎮 디스코드 클라이언트
 // ==========================
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
-const TOKEN = process.env.DISCORD_TOKEN; // Render 환경변수에 저장
+const TOKEN = process.env.DISCORD_TOKEN;
 const TRICKAL_NOTICE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/trickcal/menus/1/articles";
-const NOTICE_CHANNEL_ID = "트릭컬공지채널_ID_여기에"; // ← 바꿔주세요
+const NOTICE_CHANNEL_ID = "1435602435845656678"; // ← 여기에 채널 ID 넣기
 
 // ==========================
-// 🧩 최근 게시글 기록용 (중복 방지)
+// 🧩 중복 게시 방지용
 // ==========================
 let postedTitles = new Set();
 
@@ -58,20 +62,21 @@ async function fetchLatestPosts(url) {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
     try {
-      await page.waitForSelector("a[href*='/ArticleRead.nhn'], a[href*='/articles/']", {
-        timeout: 10000,
+      await page.waitForSelector("a[href*='/articles/'], a.link_board", {
+        timeout: 15000,
       });
     } catch {
       console.warn("⚠️ 게시글 렌더링 대기 시간 초과, 재시도 시도");
     }
 
-    await new Promise((r) => setTimeout(r, 3000));
+    // JS 렌더링 대기 (Render 환경에서는 느림)
+    await new Promise((r) => setTimeout(r, 8000));
 
     let posts = await page.evaluate(() => {
       const links = Array.from(
-        document.querySelectorAll("a[href*='/ArticleRead.nhn'], a[href*='/articles/'], a.link_board")
+        document.querySelectorAll("a[href*='/articles/'], a.link_board")
       );
-      return links.slice(0, 5).map((el) => ({
+      return links.slice(0, 10).map((el) => ({
         title: el.innerText.trim(),
         link: el.href.startsWith("http")
           ? el.href
@@ -79,14 +84,15 @@ async function fetchLatestPosts(url) {
       }));
     });
 
+    // 재시도 1회
     if (posts.length === 0) {
       console.warn("⚠️ 게시글이 0개 → 1회 재시도");
       await new Promise((r) => setTimeout(r, 5000));
       posts = await page.evaluate(() => {
         const links = Array.from(
-          document.querySelectorAll("a[href*='/ArticleRead.nhn'], a[href*='/articles/'], a.link_board")
+          document.querySelectorAll("a[href*='/articles/'], a.link_board")
         );
-        return links.slice(0, 5).map((el) => ({
+        return links.slice(0, 10).map((el) => ({
           title: el.innerText.trim(),
           link: el.href.startsWith("http")
             ? el.href
@@ -116,20 +122,22 @@ async function checkTrickalNotices() {
   if (!channel) return;
 
   for (const post of posts) {
-    if (postedTitles.has(post.title)) continue; // 🔹 중복 방지
-
+    if (postedTitles.has(post.title)) continue;
     postedTitles.add(post.title);
-    console.log("📢 새 공지:", post.title);
 
     const embed = new EmbedBuilder()
       .setTitle("📢 트릭컬 리바이브 공지사항")
-      .setDescription(`**${post.title}**`)
+      .setDescription(`🧾 **${post.title}**`)
       .setURL(post.link)
-      .setColor(0xF6C90E)
-      .setFooter({ text: "자동 수집된 네이버 카페 공지", iconURL: "https://i.imgur.com/VHb0nmn.png" })
+      .setColor(0xf6c90e)
+      .setFooter({
+        text: "자동 수집된 네이버 카페 공지",
+        iconURL: "https://i.imgur.com/VHb0nmn.png",
+      })
       .setTimestamp();
 
     await channel.send({ embeds: [embed] });
+    console.log("📢 새 공지 전송됨:", post.title);
   }
 }
 
@@ -151,8 +159,10 @@ client.on("messageCreate", async (msg) => {
 
     const embed = new EmbedBuilder()
       .setTitle("🎟️ 현재 사용 가능한 쿠폰 목록")
-      .setColor(0xF6C90E)
-      .setFooter({ text: "쿠폰 정보는 네이버 카페 기준 자동 수집됩니다." });
+      .setColor(0xf6c90e)
+      .setFooter({
+        text: "쿠폰 정보는 네이버 카페 기준 자동 수집됩니다.",
+      });
 
     couponPosts.forEach((p, i) => {
       embed.addFields({
