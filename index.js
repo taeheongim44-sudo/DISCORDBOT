@@ -1,297 +1,179 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import "dotenv/config";
+import dotenv from "dotenv";
+import { Client, GatewayIntentBits } from "discord.js";
+import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
+import cheerio from "cheerio";
 
-// --------------------- 기본설정 ---------------------
-const TOKEN = process.env.TOKEN;
-if (!TOKEN) {
-  console.error("ERROR: .env에 TOKEN 변수가 없습니다.");
-  process.exit(1);
-}
+dotenv.config();
 
+// ─────────────────────────────
+// Discord 클라이언트 설정
+// ─────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
   ],
 });
 
-const PREFIX = "!";
-const NOTICE_CHANNEL_NAME = "트릭컬공지";
+const TOKEN = process.env.TOKEN;
+if (!TOKEN) {
+  console.error("❌ 오류: .env에 TOKEN 변수가 없습니다.");
+  process.exit(1);
+}
+
+// 자동 공지 채널 ID (트릭컬 공지 채널 ID 숫자만)
+const NOTICE_CHANNEL_ID = process.env.NOTICE_CHANNEL_ID;
+
+// ─────────────────────────────
+// 크롤링 대상 URL
+// ─────────────────────────────
 const UPDATE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
 const COUPON_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
 
-// --------------------- Puppeteer ---------------------
-async function openBrowser() {
-  try {
-    const browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-zygote",
-        "--single-process",
-      ],
-      executablePath: process.env.CHROME_PATH || await chromium.executablePath(),
-    });
-    return browser;
-  } catch (err) {
-    console.error("Puppeteer 실행 오류:", err);
-    throw err;
-  }
-}
+// ─────────────────────────────
+// 게시글 크롤링
+// ─────────────────────────────
+async function fetchPosts(target) {
+  const url = target === "update" ? UPDATE_URL : COUPON_URL;
+  console.log(`[크롤링 시작] ${url}`);
 
-async function fetchPostsFromMenu(menuUrl) {
-  let browser;
-  try {
-    browser = await openBrowser();
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
-    await page.goto(menuUrl, { waitUntil: "networkidle2", timeout: 60000 });
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
+  });
 
-    const posts = await page.$$eval("a", (anchors) => {
-      const results = [];
-      for (const a of anchors) {
-        const href = a.getAttribute("href") || "";
-        const text = (a.innerText || "").trim();
-        if (!text) continue;
-        if (href.includes("ArticleRead") || href.includes("article")) {
-          results.push({ title: text, href });
-        }
-      }
-      return results;
-    });
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: "domcontentloaded" });
 
-    console.log(`[fetchPostsFromMenu] ${menuUrl} 에서 ${posts.length}개 링크 탐색`);
-    return posts;
-  } catch (err) {
-    console.error("fetchPostsFromMenu 에러:", err);
-    return [];
-  } finally {
-    if (browser) await browser.close().catch(() => {});
-  }
-}
+  const html = await page.content();
+  const $ = cheerio.load(html);
 
-async function fetchPostPreview(href) {
-  let browser;
-  try {
-    browser = await openBrowser();
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
-    const url = href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`;
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
-    const preview = await page.evaluate(() => {
-      const el =
-        document.querySelector(".se-main-container") ||
-        document.querySelector(".article_text") ||
-        document.querySelector(".board_main") ||
-        document.querySelector(".content");
-      if (el) {
-        const text = el.innerText.trim().replace(/\s+/g, " ");
-        return text.length > 200 ? text.slice(0, 200) + "..." : text;
-      }
-      return "내용 미리보기를 불러올 수 없습니다.";
-    });
-
-    return preview;
-  } catch (err) {
-    console.error("fetchPostPreview 에러:", err, "href:", href);
-    return "내용 미리보기를 불러올 수 없습니다. (서버 에러)";
-  } finally {
-    if (browser) await browser.close().catch(() => {});
-  }
-}
-
-async function getLatestPost(type) {
-  try {
-    const menuUrl = type === "update" ? UPDATE_URL : COUPON_URL;
-    const posts = await fetchPostsFromMenu(menuUrl);
-    if (!posts || posts.length === 0) {
-      console.warn(`[getLatestPost] ${type} 게시글 없음`);
-      return null;
+  const posts = [];
+  $("a[href*='/ArticleRead.nhn']").each((_, el) => {
+    const title = $(el).text().trim();
+    const link = $(el).attr("href");
+    if (title && link) {
+      posts.push({
+        title,
+        url: `https://m.cafe.naver.com${link}`,
+      });
     }
-    const filtered = posts.filter((p) => !p.title.includes("공지") && !p.title.includes("안내"));
-    const target = filtered.length > 0 ? filtered[0] : posts[0];
-    const preview = await fetchPostPreview(target.href);
-    const link = target.href.startsWith("http") ? target.href : `https://m.cafe.naver.com${target.href}`;
-    return { title: target.title, link, preview };
-  } catch (err) {
-    console.error("getLatestPost 에러:", err);
-    return null;
+  });
+
+  await browser.close();
+  console.log(`[크롤링 완료] ${target} 게시글 ${posts.length}개`);
+  return posts.slice(0, 5);
+}
+
+// ─────────────────────────────
+// 자동 공지 중복 방지용 저장소
+// ─────────────────────────────
+let sentPosts = new Set();
+
+// ─────────────────────────────
+// 자동 공지 기능
+// ─────────────────────────────
+async function autoNotify() {
+  if (!NOTICE_CHANNEL_ID) return;
+  const channel = await client.channels.fetch(NOTICE_CHANNEL_ID);
+  if (!channel) return console.log("⚠️ 공지 채널을 찾을 수 없습니다.");
+
+  // 업데이트 게시글
+  const updates = await fetchPosts("update");
+  for (const post of updates) {
+    if (!sentPosts.has(post.title)) {
+      await channel.send(`🆕 **[업데이트]** ${post.title}\n${post.url}`);
+      sentPosts.add(post.title);
+    }
+  }
+
+  // 쿠폰 게시글 (중복 방지)
+  const coupons = await fetchPosts("coupon");
+  for (const post of coupons) {
+    if (!sentPosts.has(post.title)) {
+      await channel.send(`🎟️ **[쿠폰]** ${post.title}\n${post.url}`);
+      sentPosts.add(post.title);
+    }
   }
 }
 
-async function getCouponList() {
-  try {
-    const posts = await fetchPostsFromMenu(COUPON_URL);
-    if (!posts || posts.length === 0) return [];
-    const coupons = [];
-    const limit = Math.min(posts.length, 10);
-    for (let i = 0; i < limit; i++) {
-      const p = posts[i];
-      const preview = await fetchPostPreview(p.href);
-      const combined = `${p.title}\n${preview}`;
-      const codeMatches = combined.match(/\b[A-Za-z0-9]{5,20}\b/g) || [];
-      const dateMatches = combined.match(/\b\d{1,4}[./]\d{1,2}[./]?\d{0,4}\b/g) || [];
-      const codesFiltered = codeMatches.filter((c) => /[A-Za-z]/.test(c) || c.length >= 6);
+// 10분마다 새 게시글 확인
+setInterval(autoNotify, 10 * 60 * 1000);
 
-      if (codesFiltered.length > 0) {
-        coupons.push({
-          code: codesFiltered[0],
-          expires: dateMatches[0] || "유효기간 없음",
-          title: p.title,
-          link: p.href.startsWith("http") ? p.href : `https://m.cafe.naver.com${p.href}`,
-        });
+// ─────────────────────────────
+// 명령어 처리
+// ─────────────────────────────
+client.on("messageCreate", async (msg) => {
+  if (msg.author.bot) return;
+  const content = msg.content.trim();
+
+  // !업데이트
+  if (content === "!업데이트") {
+    msg.channel.send("🔍 트릭컬 최신 업데이트 정보를 불러오는 중...");
+    try {
+      const posts = await fetchPosts("update");
+      if (posts.length === 0) {
+        msg.channel.send("❌ 업데이트 게시글을 찾을 수 없습니다.");
+      } else {
+        const formatted = posts
+          .map((p, i) => `📘 ${i + 1}. [${p.title}](${p.url})`)
+          .join("\n");
+        msg.channel.send(`✅ **트릭컬 업데이트 게시글**\n${formatted}`);
       }
+    } catch (err) {
+      console.error(err);
+      msg.channel.send("⚠️ 업데이트 정보를 불러오는 중 오류가 발생했습니다.");
     }
-    console.log(`[getCouponList] 쿠폰 후보 ${coupons.length}개`);
-    return coupons;
-  } catch (err) {
-    console.error("getCouponList 에러:", err);
-    return [];
   }
-}
 
-// --------------------- 스케줄 ---------------------
-async function doScheduledChecks() {
-  try {
-    const now = new Date();
-    const day = now.getDay();
-    const hour = now.getHours();
-    const date = now.getDate();
-
-    // 업데이트: 수요일 17시
-    if (day === 3 && hour === 17) {
-      for (const g of client.guilds.cache.values()) {
-        const ch = g.channels.cache.find((c) => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
-        if (!ch) continue;
-        const post = await getLatestPost("update");
-        if (!post) continue;
-        const embed = new EmbedBuilder()
-          .setColor(0x00bfff)
-          .setTitle("⚙️ 트릭컬 리바이브 업데이트")
-          .setDescription(`**${post.title}**\n\n${post.preview}`)
-          .setURL(post.link);
-        await ch.send({ embeds: [embed] });
+  // !쿠폰목록 → 사용 가능한 쿠폰만
+  if (content === "!쿠폰목록") {
+    msg.channel.send("🎟️ 현재 사용 가능한 쿠폰을 확인 중입니다...");
+    try {
+      const posts = await fetchPosts("coupon");
+      const available = posts.filter((p) =>
+        /(사용|가능|유효|입력)/i.test(p.title)
+      );
+      if (available.length === 0) {
+        msg.channel.send("❌ 현재 사용 가능한 쿠폰이 없습니다.");
+      } else {
+        const formatted = available
+          .map((p, i) => `🎫 ${i + 1}. [${p.title}](${p.url})`)
+          .join("\n");
+        msg.channel.send(`✅ **사용 가능한 쿠폰 목록**\n${formatted}`);
       }
+    } catch (err) {
+      console.error(err);
+      msg.channel.send("⚠️ 쿠폰 정보를 불러오는 중 오류가 발생했습니다.");
     }
-
-    // 쿠폰: 3일마다 12시
-    if (hour === 12 && date % 3 === 0) {
-      for (const g of client.guilds.cache.values()) {
-        const ch = g.channels.cache.find((c) => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
-        if (!ch) continue;
-        const post = await getLatestPost("coupon");
-        if (!post) continue;
-        const embed = new EmbedBuilder()
-          .setColor(0x00ff99)
-          .setTitle("🎁 트릭컬 리바이브 쿠폰")
-          .setDescription(`**${post.title}**\n\n${post.preview}`)
-          .setURL(post.link);
-        await ch.send({ embeds: [embed] });
-
-        const coupons = await getCouponList();
-        if (coupons.length > 0) {
-          const text = coupons.map((c) => `▫️ **${c.code}** — ${c.expires}`).join("\n");
-          await ch.send({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle("🎫 사용 가능한 쿠폰")
-                .setDescription(text)
-                .setColor(0xffcc00),
-            ],
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.error("doScheduledChecks 에러:", err);
-  }
-}
-
-// --------------------- 명령어 ---------------------
-client.on("messageCreate", async (m) => {
-  if (m.author.bot) return;
-  const content = m.content.trim();
-  if (!content.startsWith(PREFIX)) return;
-  const [cmd, arg] = content.slice(1).split(" ");
-
-  if (cmd === "공지") {
-    const type = arg === "쿠폰" ? "coupon" : "update";
-    const post = await getLatestPost(type);
-    if (!post) return m.reply("불러올 수 없습니다.");
-    const embed = new EmbedBuilder()
-      .setColor(type === "update" ? 0x00bfff : 0x00ff99)
-      .setTitle(type === "update" ? "📢 최신 업데이트" : "🎁 최신 쿠폰")
-      .setDescription(`**${post.title}**\n\n${post.preview}`)
-      .setURL(post.link);
-    return m.reply({ embeds: [embed] });
-  }
-
-  if (cmd === "쿠폰목록") {
-    const coupons = await getCouponList();
-    if (coupons.length === 0) return m.reply("쿠폰을 불러올 수 없습니다.");
-    const embed = new EmbedBuilder()
-      .setTitle("🎫 사용 가능한 쿠폰 목록")
-      .setDescription(
-        coupons.map((c) => `**${c.code}** — ${c.expires}\n${c.title}`).join("\n\n")
-      )
-      .setColor(0xffcc00);
-    return m.reply({ embeds: [embed] });
-  }
-
-  if (cmd === "명령어") {
-    const embed = new EmbedBuilder()
-      .setTitle("📜 사용 가능한 명령어 목록")
-      .setDescription(
-        [
-          "`!공지 업데이트` - 최신 업데이트 공지 불러오기",
-          "`!공지 쿠폰` - 최신 쿠폰 공지 불러오기",
-          "`!쿠폰목록` - 사용 가능한 쿠폰 목록 보기",
-          "`!명령어` - 이 도움말 보기",
-        ].join("\n")
-      )
-      .setColor(0x00ffff);
-    return m.reply({ embeds: [embed] });
   }
 });
 
-// --------------------- 새 멤버 환영 ---------------------
-client.on("guildMemberAdd", async (member) => {
-  const ch =
-    member.guild.systemChannel ||
-    member.guild.channels.cache.find((c) => c.name === "일반");
-  if (ch && ch.isTextBased()) {
-    const embed = new EmbedBuilder()
-      .setColor(0x00ffcc)
-      .setTitle("안녕하세요!! 버터의옐로카드에 오신걸 환영합니다!! !명령어로 시작해보세요")
-      .setDescription(`환영합니다, ${member.user.username}님! 즐거운 시간 되세요 🎉`);
-    await ch.send({ embeds: [embed] });
-  }
-});
-
-// --------------------- Ready ---------------------
-client.once("ready", () => {
+// ─────────────────────────────
+// 봇 로그인 및 서버 유지
+// ─────────────────────────────
+client.once("clientReady", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 체크
+  autoNotify(); // 봇 시작 시 1회 즉시 실행
 });
 
-import express from "express";
+client.login(TOKEN);
+
+// ─────────────────────────────
+// Keep-alive 서버
+// ─────────────────────────────
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("🌐 Keep-alive 서버 실행됨\n✅ 버터의옐로카드(노예) 정상 동작 중!");
+  res.send("🌐 Keep-alive 서버 실행 중\n✅ 버터의옐로카드(노예) 정상 작동!");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Keep-alive 서버 실행됨 (포트: ${PORT})`);
 });
-
-client.login(TOKEN);
