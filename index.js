@@ -1,32 +1,3 @@
-import express from "express";
-
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-app.get("/", (req, res) => res.send("봇이 실행 중입니다."));
-app.listen(PORT, () => console.log(`🌐 Keep-alive 서버 실행됨 (포트: ${PORT})`));
-이렇게 하면 Render가 포트를 감지하고 배포가 정상적으로 완료됩니다.
-
-원하면 제가 지금 전체 디스코드 봇 코드에 이 Keep-alive 서버 포함 버전으로 통합해서 바로 돌릴 수 있는 형태로 만들어 드릴 수도 있어요.
-
-만들어드릴까요?
-
-
-
-
-
-
-
-나의 말:
-만들어둿더거에 붙여서줘
-
-
-
-ChatGPT의 말:
-좋아요. 그럼 지금까지 작성된 디스코드 봇 코드 그대로 두고, Render에서 포트를 감지하도록 Keep-alive 서버를 붙인 전체 버전으로 만들어드릴게요. TTS 기능은 제거된 상태 기준이고, 중복 자동공지 방지 및 !쿠폰목록 명령어 포함입니다.
-
-js
-코드 복사
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
 import puppeteer from "puppeteer-core";
