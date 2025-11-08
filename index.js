@@ -3,7 +3,6 @@ import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import fetch from "node-fetch";
-import express from "express";
 
 // --------------------- 기본설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -17,6 +16,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
   ],
 });
@@ -28,14 +28,27 @@ const UPDATE_URL =
 const COUPON_URL =
   "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
 
+const sentPosts = { update: null, coupon: null };
+
 // --------------------- Puppeteer ---------------------
 async function openBrowser() {
-  return await puppeteer.launch({
-    headless: "new",
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: process.env.CHROME_PATH || await chromium.executablePath(),
-  });
+  try {
+    return await puppeteer.launch({
+      headless: "new",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process",
+      ],
+      executablePath: process.env.CHROME_PATH || undefined,
+    });
+  } catch (err) {
+    console.error("Puppeteer 실행 오류:", err);
+    throw err;
+  }
 }
 
 async function fetchPostsFromMenu(menuUrl) {
@@ -43,19 +56,22 @@ async function fetchPostsFromMenu(menuUrl) {
   try {
     browser = await openBrowser();
     const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
+    await page.setUserAgent(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
+    );
     await page.goto(menuUrl, { waitUntil: "networkidle2", timeout: 60000 });
 
     const posts = await page.$$eval("a", (anchors) => {
-      return anchors
-        .map(a => {
-          const href = a.getAttribute("href") || "";
-          const title = (a.innerText || "").trim();
-          if (!title) return null;
-          if (href.includes("ArticleRead") || href.includes("article")) return { title, href };
-          return null;
-        })
-        .filter(Boolean);
+      const results = [];
+      for (const a of anchors) {
+        const href = a.getAttribute("href") || "";
+        const text = (a.innerText || "").trim();
+        if (!text) continue;
+        if (href.includes("ArticleRead") || href.includes("article")) {
+          results.push({ title: text, href });
+        }
+      }
+      return results;
     });
 
     console.log(`[fetchPostsFromMenu] ${menuUrl}에서 ${posts.length}개 링크 탐색`);
@@ -73,7 +89,9 @@ async function fetchPostPreview(href) {
   try {
     browser = await openBrowser();
     const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
+    await page.setUserAgent(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
+    );
     const url = href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`;
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
@@ -104,11 +122,17 @@ async function getLatestPost(type) {
     const menuUrl = type === "update" ? UPDATE_URL : COUPON_URL;
     const posts = await fetchPostsFromMenu(menuUrl);
     if (!posts || posts.length === 0) return null;
-
     const filtered = posts.filter(p => !p.title.includes("공지") && !p.title.includes("안내"));
     const target = filtered.length > 0 ? filtered[0] : posts[0];
+
+    if (sentPosts[type] && sentPosts[type].link === target.href) {
+      // 이미 보낸 게시글이면 null 반환
+      return null;
+    }
+
     const preview = await fetchPostPreview(target.href);
     const link = target.href.startsWith("http") ? target.href : `https://m.cafe.naver.com${target.href}`;
+    sentPosts[type] = { link: target.href };
     return { title: target.title, link, preview };
   } catch (err) {
     console.error("getLatestPost 에러:", err);
@@ -121,12 +145,17 @@ async function getCouponList() {
     const posts = await fetchPostsFromMenu(COUPON_URL);
     if (!posts || posts.length === 0) return [];
     const coupons = [];
-    for (const p of posts.slice(0, 10)) {
+    const limit = Math.min(posts.length, 10);
+
+    for (let i = 0; i < limit; i++) {
+      const p = posts[i];
       const preview = await fetchPostPreview(p.href);
       const combined = `${p.title}\n${preview}`;
+
       const codeMatches = combined.match(/\b[A-Za-z0-9]{5,20}\b/g) || [];
       const dateMatches = combined.match(/\b\d{1,4}[./]\d{1,2}[./]?\d{0,4}\b/g) || [];
       const codesFiltered = codeMatches.filter(c => /[A-Za-z]/.test(c) || c.length >= 6);
+
       if (codesFiltered.length > 0) {
         coupons.push({
           code: codesFiltered[0],
@@ -136,6 +165,7 @@ async function getCouponList() {
         });
       }
     }
+    console.log(`[getCouponList] 쿠폰 후보 ${coupons.length}개`);
     return coupons;
   } catch (err) {
     console.error("getCouponList 에러:", err);
@@ -143,9 +173,7 @@ async function getCouponList() {
   }
 }
 
-// --------------------- 자동공지 ---------------------
-const sentPosts = { update: new Set(), coupon: new Set() };
-
+// --------------------- 스케줄 ---------------------
 async function doScheduledChecks() {
   try {
     const now = new Date();
@@ -153,15 +181,13 @@ async function doScheduledChecks() {
     const hour = now.getHours();
     const date = now.getDate();
 
-    for (const g of client.guilds.cache.values()) {
-      const ch = g.channels.cache.find(c => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
-      if (!ch) continue;
-
-      // 업데이트: 수요일 17시
-      if (day === 3 && hour === 17) {
+    // 업데이트: 수요일 17시
+    if (day === 3 && hour === 17) {
+      for (const g of client.guilds.cache.values()) {
+        const ch = g.channels.cache.find(c => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
+        if (!ch) continue;
         const post = await getLatestPost("update");
-        if (!post || sentPosts.update.has(post.link)) continue;
-        sentPosts.update.add(post.link);
+        if (!post) continue;
         const embed = new EmbedBuilder()
           .setColor(0x00bfff)
           .setTitle("⚙️ 트릭컬 리바이브 업데이트")
@@ -169,30 +195,26 @@ async function doScheduledChecks() {
           .setURL(post.link);
         await ch.send({ embeds: [embed] });
       }
+    }
 
-      // 쿠폰: 3일마다 12시
-      if (hour === 12 && date % 3 === 0) {
+    // 쿠폰: 3일마다 12시
+    if (hour === 12 && date % 3 === 0) {
+      for (const g of client.guilds.cache.values()) {
+        const ch = g.channels.cache.find(c => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
+        if (!ch) continue;
         const post = await getLatestPost("coupon");
-        if (post && !sentPosts.coupon.has(post.link)) {
-          sentPosts.coupon.add(post.link);
-          const embed = new EmbedBuilder()
-            .setColor(0x00ff99)
-            .setTitle("🎁 트릭컬 리바이브 쿠폰")
-            .setDescription(`**${post.title}**\n\n${post.preview}`)
-            .setURL(post.link);
-          await ch.send({ embeds: [embed] });
-        }
+        if (!post) continue;
+        const embed = new EmbedBuilder()
+          .setColor(0x00ff99)
+          .setTitle("🎁 트릭컬 리바이브 쿠폰")
+          .setDescription(`**${post.title}**\n\n${post.preview}`)
+          .setURL(post.link);
+        await ch.send({ embeds: [embed] });
 
         const coupons = await getCouponList();
         if (coupons.length > 0) {
           const text = coupons.map(c => `▫️ **${c.code}** — ${c.expires}`).join("\n");
-          await ch.send({
-            embeds: [
-              new EmbedBuilder().setTitle("🎫 사용 가능한 쿠폰")
-                .setDescription(text)
-                .setColor(0xffcc00),
-            ],
-          });
+          await ch.send({ embeds: [new EmbedBuilder().setTitle("🎫 사용 가능한 쿠폰").setDescription(text).setColor(0xffcc00)] });
         }
       }
     }
@@ -259,14 +281,7 @@ client.on("guildMemberAdd", async (member) => {
 // --------------------- Ready ---------------------
 client.once("ready", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 스케줄 체크
+  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 체크
 });
 
-// --------------------- Keep-alive 서버 ---------------------
-const app = express();
-const PORT = process.env.PORT || 10000;
-app.get("/", (req, res) => res.send("봇 실행 중"));
-app.listen(PORT, () => console.log(`🌐 Keep-alive 서버 실행됨 (포트: ${PORT})`));
-
-// --------------------- 로그인 ---------------------
 client.login(TOKEN);
