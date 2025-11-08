@@ -1,8 +1,8 @@
 import express from "express";
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
 
 // --------------------- 기본설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -29,39 +29,34 @@ const app = express();
 app.get("/", (req, res) => res.send("✅ Trickcal 디스코드 봇 작동중"));
 app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 
-// --------------------- Puppeteer 크롤러 ---------------------
+// --------------------- Cheerio 크롤러 ---------------------
 async function fetchLatestPosts(url) {
-  let browser;
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    });
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const posts = [];
+    $("a[href*='/ArticleRead.nhn']").each((i, el) => {
+      const title = $(el).text().trim();
+      const href = $(el).attr("href");
+      if (title && href) {
+        posts.push({
+          title,
+          link: href.startsWith("http")
+            ? href
+            : `https://m.cafe.naver.com${href}`,
+        });
+      }
     });
 
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-
-    const posts = await page.$$eval("a", (links) =>
-      links
-        .map((a) => ({
-          title: a.innerText.trim(),
-          href: a.href,
-        }))
-        .filter((p) => p.href.includes("/articles/") && p.title)
-        .slice(0, 5)
-    );
-
-    return posts.map((p) => ({
-      title: p.title,
-      link: p.href.startsWith("http") ? p.href : `https://m.cafe.naver.com${p.href}`,
-    }));
+    console.log("📋 Found posts:", posts.length);
+    return posts.slice(0, 5);
   } catch (err) {
-    console.error("❌ Puppeteer 크롤링 오류:", err);
+    console.error("❌ 크롤링 오류:", err);
     return [];
-  } finally {
-    if (browser) await browser.close();
   }
 }
 
@@ -73,7 +68,9 @@ async function checkNewPosts() {
   const updatePosts = await fetchLatestPosts(UPDATE_URL);
   const couponPosts = await fetchLatestPosts(COUPON_URL);
 
-  const channel = client.channels.cache.find((ch) => ch.name === NOTICE_CHANNEL_NAME);
+  const channel = client.channels.cache.find(
+    (ch) => ch.name === NOTICE_CHANNEL_NAME
+  );
   if (!channel) return;
 
   if (updatePosts[0] && updatePosts[0].title !== lastUpdateTitle) {
@@ -117,7 +114,9 @@ client.on("messageCreate", async (m) => {
     const embed = new EmbedBuilder()
       .setColor(isCoupon ? 0x00ff99 : 0x00bfff)
       .setTitle(isCoupon ? "🎁 최신 쿠폰 공지" : "📢 최신 업데이트 공지")
-      .setDescription(posts.map((p) => `• [${p.title}](${p.link})`).join("\n\n"));
+      .setDescription(
+        posts.map((p) => `• [${p.title}](${p.link})`).join("\n\n")
+      );
     return m.reply({ embeds: [embed] });
   }
 
