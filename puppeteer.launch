@@ -5,6 +5,7 @@ import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
+import { execSync } from "child_process";
 
 // --------------------- 설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -38,6 +39,14 @@ async function fetchLatestPosts(url) {
     const executablePath = await chromium.executablePath();
     console.log("🧩 Chromium 실행 경로:", executablePath);
 
+    // ⚙️ 실행 권한 수정 (Render에서 ETXTBSY 방지)
+    try {
+      execSync(`chmod 755 ${executablePath}`);
+      console.log("✅ Chromium 실행 권한 수정 완료");
+    } catch (e) {
+      console.warn("⚠️ Chromium 권한 수정 실패:", e.message);
+    }
+
     browser = await puppeteer.launch({
       args: [
         ...chromium.args,
@@ -49,13 +58,11 @@ async function fetchLatestPosts(url) {
       ],
       defaultViewport: chromium.defaultViewport,
       executablePath,
-      headless: "new", // Render에서 안정적인 모드
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
-    // 잠시 대기 (렌더링 안정화)
     await page.waitForTimeout(2000);
 
     const posts = await page.evaluate(() => {
@@ -76,15 +83,10 @@ async function fetchLatestPosts(url) {
     console.error("❌ Puppeteer 크롤링 오류:", err);
     return [];
   } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (e) {
-        console.warn("⚠️ 브라우저 종료 중 경고:", e.message);
-      }
-    }
+    if (browser) await browser.close();
   }
 }
+
 let lastUpdateTitle = "";
 let lastCouponTitle = "";
 
