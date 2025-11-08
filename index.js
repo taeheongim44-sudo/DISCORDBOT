@@ -281,7 +281,6 @@ client.once("ready", () => {
 });
 
 client.login(TOKEN);
-✅ package.json은 이렇게 유지
 json
 코드 복사
 {
