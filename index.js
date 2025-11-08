@@ -6,8 +6,6 @@ import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import { execSync } from "child_process";
-import fs from "fs";
-import path from "path";
 
 // --------------------- 설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -34,38 +32,40 @@ const app = express();
 app.get("/", (req, res) => res.send("✅ Trickcal 디스코드 봇 작동중"));
 app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 
-// --------------------- 크롤러 ---------------------
+// --------------------- Puppeteer 공통 함수 ---------------------
+async function launchBrowser() {
+  const executablePath = await chromium.executablePath();
+  console.log("🧩 Chromium 실행 경로:", executablePath);
+
+  try {
+    execSync(`chmod 755 ${executablePath}`);
+    console.log("✅ Chromium 실행 권한 수정 완료");
+  } catch (e) {
+    console.warn("⚠️ Chromium 권한 수정 실패:", e.message);
+  }
+
+  return puppeteer.launch({
+    args: [
+      ...chromium.args,
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--single-process",
+      "--no-zygote",
+      "--js-flags=--max-old-space-size=64",
+    ],
+    defaultViewport: chromium.defaultViewport,
+    executablePath,
+    headless: chromium.headless,
+  });
+}
+
+// --------------------- 최신 게시물 가져오기 ---------------------
 async function fetchLatestPosts(url) {
   let browser;
   try {
-    // 🧩 Chromium 실행 경로 확보
-    const originalPath = await chromium.executablePath();
-    const tempPath = path.join("/tmp", `chromium-${Date.now()}`);
-    console.log("🧩 Chromium 실행 경로:", originalPath);
-
-    // 🧩 Chromium 복사 및 권한 부여 (ETXTBSY 방지)
-    try {
-      fs.copyFileSync(originalPath, tempPath);
-      execSync(`chmod 755 ${tempPath}`);
-      console.log("✅ Chromium 임시 복사 및 권한 설정 완료:", tempPath);
-    } catch (e) {
-      console.warn("⚠️ Chromium 복사 실패:", e.message);
-    }
-
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--single-process",
-        "--no-zygote",
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: tempPath,
-      headless: chromium.headless,
-    });
-
+    browser = await launchBrowser();
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
     await new Promise((r) => setTimeout(r, 2000));
@@ -92,10 +92,10 @@ async function fetchLatestPosts(url) {
   }
 }
 
-let lastUpdateTitle = "";
-let lastCouponTitle = "";
-
 // --------------------- 새글 자동 감지 ---------------------
+let postedUpdateTitles = new Set();
+let postedCouponTitles = new Set();
+
 async function checkNewPosts() {
   const updatePosts = await fetchLatestPosts(UPDATE_URL);
   const couponPosts = await fetchLatestPosts(COUPON_URL);
@@ -105,27 +105,34 @@ async function checkNewPosts() {
   );
   if (!channel) return;
 
-  if (updatePosts[0] && updatePosts[0].title !== lastUpdateTitle) {
-    lastUpdateTitle = updatePosts[0].title;
-    const embed = new EmbedBuilder()
-      .setColor(0x00bfff)
-      .setTitle("📢 새 업데이트 공지")
-      .setDescription(`**${updatePosts[0].title}**`)
-      .setURL(updatePosts[0].link);
-    channel.send({ embeds: [embed] });
+  // ✅ 업데이트 공지
+  for (const post of updatePosts) {
+    if (!postedUpdateTitles.has(post.title)) {
+      postedUpdateTitles.add(post.title);
+      const embed = new EmbedBuilder()
+        .setColor(0x00bfff)
+        .setTitle("📢 새 업데이트 공지")
+        .setDescription(`**${post.title}**`)
+        .setURL(post.link);
+      await channel.send({ embeds: [embed] });
+    }
   }
 
-  if (couponPosts[0] && couponPosts[0].title !== lastCouponTitle) {
-    lastCouponTitle = couponPosts[0].title;
-    const embed = new EmbedBuilder()
-      .setColor(0x00ff99)
-      .setTitle("🎁 새 쿠폰 공지")
-      .setDescription(`**${couponPosts[0].title}**`)
-      .setURL(couponPosts[0].link);
-    channel.send({ embeds: [embed] });
+  // ✅ 쿠폰 공지
+  for (const post of couponPosts) {
+    if (!postedCouponTitles.has(post.title)) {
+      postedCouponTitles.add(post.title);
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff99)
+        .setTitle("🎁 새 쿠폰 공지")
+        .setDescription(`**${post.title}**`)
+        .setURL(post.link);
+      await channel.send({ embeds: [embed] });
+    }
   }
 }
 
+// 5분마다 검사
 setInterval(checkNewPosts, 5 * 60 * 1000);
 
 // --------------------- 명령어 ---------------------
@@ -165,7 +172,6 @@ client.on("messageCreate", async (m) => {
     return m.reply({ embeds: [embed] });
   }
 
-  // ✅ 쿠폰목록 명령어
   if (cmd === "쿠폰목록") {
     await m.reply("🔍 쿠폰 정보를 불러오는 중입니다... 잠시만 기다려주세요.");
 
@@ -176,27 +182,10 @@ client.on("messageCreate", async (m) => {
 
     for (const post of posts) {
       try {
-        const originalPath = await chromium.executablePath();
-        const tempPath = path.join("/tmp", `chromium-${Date.now()}`);
-        fs.copyFileSync(originalPath, tempPath);
-        execSync(`chmod 755 ${tempPath}`);
-
-        const browser = await puppeteer.launch({
-          args: [
-            ...chromium.args,
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--single-process",
-            "--no-zygote",
-          ],
-          defaultViewport: chromium.defaultViewport,
-          executablePath: tempPath,
-          headless: chromium.headless,
-        });
-
+        const browser = await launchBrowser();
         const page = await browser.newPage();
         await page.goto(post.link, { waitUntil: "networkidle2", timeout: 60000 });
+
         const text = await page.evaluate(() => document.body.innerText);
         await browser.close();
 
@@ -223,19 +212,20 @@ client.on("messageCreate", async (m) => {
         couponDetails
           .map(
             (c) =>
-              `**[${c.title}](${c.link})**\n` +
-              `> 🔢 쿠폰번호: \`${c.code}\`\n> ⏰ 기간: ${c.period}`
+              `**[${c.title}](${c.link})**\n> 🔢 쿠폰번호: \`${c.code}\`\n> ⏰ 기간: ${c.period}`
           )
           .join("\n\n")
       )
-      .setFooter({ text: "※ 쿠폰 정보는 네이버 카페 게시글을 기준으로 자동 수집됩니다." });
+      .setFooter({
+        text: "※ 쿠폰 정보는 네이버 카페 게시글을 기준으로 자동 수집됩니다.",
+      });
 
     return m.reply({ embeds: [embed] });
   }
 });
 
 // --------------------- Ready ---------------------
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
   checkNewPosts();
 });
