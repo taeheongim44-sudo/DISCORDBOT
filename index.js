@@ -1,0 +1,133 @@
+import express from "express";
+import fetch from "node-fetch";
+import cheerio from "cheerio";
+import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
+import "dotenv/config";
+
+const TOKEN = process.env.TOKEN;
+if (!TOKEN) {
+  console.error("❌ ERROR: .env에 TOKEN 변수가 없습니다.");
+  process.exit(1);
+}
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+const PREFIX = "!";
+const NOTICE_CHANNEL_NAME = "트릭컬공지";
+const UPDATE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
+const COUPON_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
+
+const app = express();
+app.get("/", (req, res) => res.send("✅ Trickcal Discord Bot Running"));
+app.listen(3000, () => console.log("🌐 Keep-alive server running on port 3000"));
+
+async function fetchLatestPosts(url) {
+  try {
+    const res = await fetch(url);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const posts = [];
+    $("a").each((_, el) => {
+      const title = $(el).text().trim();
+      const href = $(el).attr("href");
+      if (href && href.includes("/articles/") && title) {
+        posts.push({
+          title,
+          link: href.startsWith("http")
+            ? href
+            : `https://m.cafe.naver.com${href}`,
+        });
+      }
+    });
+
+    return posts.slice(0, 5);
+  } catch (err) {
+    console.error("❌ 크롤링 오류:", err);
+    return [];
+  }
+}
+
+let lastUpdateTitle = "";
+let lastCouponTitle = "";
+
+async function checkNewPosts() {
+  const updatePosts = await fetchLatestPosts(UPDATE_URL);
+  const couponPosts = await fetchLatestPosts(COUPON_URL);
+
+  const channel = client.channels.cache.find(
+    (ch) => ch.name === NOTICE_CHANNEL_NAME
+  );
+  if (!channel) return;
+
+  if (updatePosts[0] && updatePosts[0].title !== lastUpdateTitle) {
+    lastUpdateTitle = updatePosts[0].title;
+    const embed = new EmbedBuilder()
+      .setColor(0x00bfff)
+      .setTitle("📢 새 업데이트 공지")
+      .setDescription(`**${updatePosts[0].title}**`)
+      .setURL(updatePosts[0].link);
+    channel.send({ embeds: [embed] });
+  }
+
+  if (couponPosts[0] && couponPosts[0].title !== lastCouponTitle) {
+    lastCouponTitle = couponPosts[0].title;
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff99)
+      .setTitle("🎁 새 쿠폰 공지")
+      .setDescription(`**${couponPosts[0].title}**`)
+      .setURL(couponPosts[0].link);
+    channel.send({ embeds: [embed] });
+  }
+}
+
+setInterval(checkNewPosts, 5 * 60 * 1000);
+
+client.on("messageCreate", async (m) => {
+  if (m.author.bot) return;
+  const content = m.content.trim();
+  if (!content.startsWith(PREFIX)) return;
+
+  const [cmd, arg] = content.slice(1).split(" ");
+
+  if (cmd === "공지") {
+    const isCoupon = arg === "쿠폰";
+    const url = isCoupon ? COUPON_URL : UPDATE_URL;
+    const posts = await fetchLatestPosts(url);
+
+    if (posts.length === 0) return m.reply("불러올 수 없습니다 😢");
+
+    const embed = new EmbedBuilder()
+      .setColor(isCoupon ? 0x00ff99 : 0x00bfff)
+      .setTitle(isCoupon ? "🎁 최신 쿠폰 공지" : "📢 최신 업데이트 공지")
+      .setDescription(posts.map((p) => `• [${p.title}](${p.link})`).join("\n\n"));
+    return m.reply({ embeds: [embed] });
+  }
+
+  if (cmd === "명령어") {
+    const embed = new EmbedBuilder()
+      .setTitle("📜 사용 가능한 명령어")
+      .setDescription(
+        [
+          "`!공지 업데이트` - 최신 업데이트 공지 보기",
+          "`!공지 쿠폰` - 최신 쿠폰 공지 보기",
+          "`!명령어` - 명령어 목록 보기",
+        ].join("\n")
+      )
+      .setColor(0x00ffff);
+    return m.reply({ embeds: [embed] });
+  }
+});
+
+client.once("ready", () => {
+  console.log(`✅ ${client.user.tag} 실행됨`);
+  checkNewPosts();
+});
+
+client.login(TOKEN);
