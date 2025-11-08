@@ -1,8 +1,4 @@
 {
-  "name": "discord-bot",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": { "start": "node index.js" },
   "dependencies": {
     "discord.js": "^14.24.2",
     "dotenv": "^16.4.5",
