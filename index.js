@@ -1,8 +1,9 @@
-import dotenv from "dotenv";
-import { Client, GatewayIntentBits } from "discord.js";
-import express from "express";
+import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
+import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
+import fetch from "node-fetch";
+import express from "express";
 import * as cheerio from "cheerio";
 
 dotenv.config();
