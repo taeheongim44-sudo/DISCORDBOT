@@ -17,7 +17,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const NOTICE_CHANNEL_ID = "트릭컬공지채널_ID_여기에"; // 여기에 숫자형 Discord 채널 ID 넣기
+const NOTICE_CHANNEL_ID = "1435644802052919326"; // 여기에 숫자형 Discord 채널 ID 넣기
 const UPDATE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
 const COUPON_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
 
