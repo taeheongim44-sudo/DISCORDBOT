@@ -3,6 +3,8 @@ import fetch from "node-fetch";
 import * as cheerio from "cheerio";
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 // --------------------- 설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -31,30 +33,39 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 
 // --------------------- 크롤러 ---------------------
 async function fetchLatestPosts(url) {
+  let browser;
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
-    const html = await res.text();
-    const $ = cheerio.load(html);
 
-    const posts = [];
-    $("a[href*='/ArticleRead.nhn'], a[href*='/articles/']").each((i, el) => {
-      const title = $(el).text().trim();
-      const href = $(el).attr("href");
-      if (title && href) {
-        posts.push({
-          title,
-          link: href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`,
-        });
-      }
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+
+    await page.waitForTimeout(2000);
+
+    const posts = await page.evaluate(() => {
+      const links = Array.from(
+        document.querySelectorAll("a[href*='/ArticleRead.nhn'], a[href*='/articles/']")
+      );
+      return links.slice(0, 5).map((el) => ({
+        title: el.innerText.trim(),
+        link: el.href.startsWith("http")
+          ? el.href
+          : `https://m.cafe.naver.com${el.getAttribute("href")}`,
+      }));
     });
 
     console.log("📋 Found posts:", posts.length);
-    return posts.slice(0, 5);
+    return posts;
   } catch (err) {
-    console.error("❌ 크롤링 오류:", err);
+    console.error("❌ Puppeteer 크롤링 오류:", err);
     return [];
+  } finally {
+    if (browser) await browser.close();
   }
 }
 
