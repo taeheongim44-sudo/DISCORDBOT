@@ -282,7 +282,6 @@ client.once("ready", () => {
 
 client.login(TOKEN);
 json
-코드 복사
 {
   "name": "discord-bot",
   "version": "1.0.0",
