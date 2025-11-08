@@ -63,6 +63,8 @@ async function fetchLatestPosts(url) {
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+
+    // ⏱ Puppeteer 24 이상에서는 waitForTimeout 제거됨 → setTimeout으로 대체
     await new Promise((r) => setTimeout(r, 2000));
 
     const posts = await page.evaluate(() => {
