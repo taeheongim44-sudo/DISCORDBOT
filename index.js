@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import googleTTS from "google-tts-api";
 import fetch from "node-fetch";
 import {
