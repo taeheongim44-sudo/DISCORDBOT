@@ -6,6 +6,8 @@ import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 // --------------------- 설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -36,14 +38,18 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 async function fetchLatestPosts(url) {
   let browser;
   try {
-    const executablePath = await chromium.executablePath();
-    console.log("🧩 Chromium 실행 경로:", executablePath);
+    // 🧩 Chromium 실행 경로 확보
+    const originalPath = await chromium.executablePath();
+    const tempPath = path.join("/tmp", `chromium-${Date.now()}`);
+    console.log("🧩 Chromium 실행 경로:", originalPath);
 
+    // 🧩 Chromium 복사 및 권한 부여 (ETXTBSY 방지)
     try {
-      execSync(`chmod 755 ${executablePath}`);
-      console.log("✅ Chromium 실행 권한 수정 완료");
+      fs.copyFileSync(originalPath, tempPath);
+      execSync(`chmod 755 ${tempPath}`);
+      console.log("✅ Chromium 임시 복사 및 권한 설정 완료:", tempPath);
     } catch (e) {
-      console.warn("⚠️ Chromium 권한 수정 실패:", e.message);
+      console.warn("⚠️ Chromium 복사 실패:", e.message);
     }
 
     browser = await puppeteer.launch({
@@ -56,7 +62,7 @@ async function fetchLatestPosts(url) {
         "--no-zygote",
       ],
       defaultViewport: chromium.defaultViewport,
-      executablePath,
+      executablePath: tempPath,
       headless: chromium.headless,
     });
 
@@ -170,7 +176,11 @@ client.on("messageCreate", async (m) => {
 
     for (const post of posts) {
       try {
-        const executablePath = await chromium.executablePath();
+        const originalPath = await chromium.executablePath();
+        const tempPath = path.join("/tmp", `chromium-${Date.now()}`);
+        fs.copyFileSync(originalPath, tempPath);
+        execSync(`chmod 755 ${tempPath}`);
+
         const browser = await puppeteer.launch({
           args: [
             ...chromium.args,
@@ -181,7 +191,7 @@ client.on("messageCreate", async (m) => {
             "--no-zygote",
           ],
           defaultViewport: chromium.defaultViewport,
-          executablePath,
+          executablePath: tempPath,
           headless: chromium.headless,
         });
 
@@ -190,10 +200,7 @@ client.on("messageCreate", async (m) => {
         const text = await page.evaluate(() => document.body.innerText);
         await browser.close();
 
-        // ✅ 쿠폰코드 패턴
         const codeMatch = text.match(/\b[A-Z0-9]{8,20}\b/g);
-
-        // ✅ 기간 패턴
         const dateMatch = text.match(
           /(\d{4}[.-]\d{1,2}[.-]\d{1,2}|~\s*\d{1,2}[./]\d{1,2}|\d{2}[.]\d{1,2}[.]\d{1,2}|~\s*\d{1,2}월?\s*\d{1,2}일?)/g
         );
@@ -228,7 +235,7 @@ client.on("messageCreate", async (m) => {
 });
 
 // --------------------- Ready ---------------------
-client.once("clientReady", () => {
+client.once("ready", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
   checkNewPosts();
 });
