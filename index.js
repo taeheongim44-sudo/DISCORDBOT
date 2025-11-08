@@ -21,8 +21,8 @@ const client = new Client({
 
 const PREFIX = "!";
 const NOTICE_CHANNEL_NAME = "트릭컬공지";
-const UPDATE_URL = "https://cafe.naver.com/f-e/cafes/30131231/menus/67";
-const COUPON_URL = "https://cafe.naver.com/f-e/cafes/30131231/menus/85";
+const UPDATE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
+const COUPON_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
 
 // --------------------- Keep Alive ---------------------
 const app = express();
