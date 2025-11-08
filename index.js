@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits } from "discord.js";
 import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 
 dotenv.config();
 
