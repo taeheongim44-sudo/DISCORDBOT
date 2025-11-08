@@ -8,8 +8,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-fetch": "^3.3.2",
-    "cheerio": "^1.0.0-rc.12",
-    "puppeteer-core": "^24.29.0",
-    "@sparticuz/chromium": "^126.0.0"
+    "cheerio": "^1.0.0-rc.12"
   }
 }
