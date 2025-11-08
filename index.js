@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import "dotenv/config";
+import dotenv from "dotenv";           // ✅ dotenv를 변수로 import
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import fetch from "node-fetch";
