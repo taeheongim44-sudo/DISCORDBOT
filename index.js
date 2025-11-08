@@ -63,7 +63,7 @@ async function fetchLatestPosts(url) {
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-    await page.waitForTimeout(2000);
+    await new Promise((r) => setTimeout(r, 2000));
 
     const posts = await page.evaluate(() => {
       const links = Array.from(
