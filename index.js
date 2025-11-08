@@ -39,7 +39,6 @@ async function fetchLatestPosts(url) {
     const executablePath = await chromium.executablePath();
     console.log("🧩 Chromium 실행 경로:", executablePath);
 
-    // ⚙️ 실행 권한 수정 (Render에서 ETXTBSY 방지)
     try {
       execSync(`chmod 755 ${executablePath}`);
       console.log("✅ Chromium 실행 권한 수정 완료");
@@ -63,8 +62,6 @@ async function fetchLatestPosts(url) {
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
-    // ⏱ Puppeteer 24 이상에서는 waitForTimeout 제거됨 → setTimeout으로 대체
     await new Promise((r) => setTimeout(r, 2000));
 
     const posts = await page.evaluate(() => {
@@ -123,7 +120,7 @@ async function checkNewPosts() {
   }
 }
 
-setInterval(checkNewPosts, 5 * 60 * 1000); // 5분마다 확인
+setInterval(checkNewPosts, 5 * 60 * 1000);
 
 // --------------------- 명령어 ---------------------
 client.on("messageCreate", async (m) => {
@@ -154,18 +151,82 @@ client.on("messageCreate", async (m) => {
         [
           "`!공지 업데이트` - 최신 업데이트 공지 보기",
           "`!공지 쿠폰` - 최신 쿠폰 공지 보기",
+          "`!쿠폰목록` - 쿠폰 번호와 기간 확인",
           "`!명령어` - 명령어 목록 보기",
         ].join("\n")
       )
       .setColor(0x00ffff);
     return m.reply({ embeds: [embed] });
   }
+
+  // ✅ 쿠폰목록 명령어
+  if (cmd === "쿠폰목록") {
+    await m.reply("🔍 쿠폰 정보를 불러오는 중입니다... 잠시만 기다려주세요.");
+
+    const posts = await fetchLatestPosts(COUPON_URL);
+    if (posts.length === 0) return m.reply("쿠폰 게시글을 불러올 수 없습니다 😢");
+
+    const couponDetails = [];
+    for (const post of posts) {
+      try {
+        const browser = await puppeteer.launch({
+          args: [
+            ...chromium.args,
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--single-process",
+            "--no-zygote",
+          ],
+          defaultViewport: chromium.defaultViewport,
+          executablePath: await chromium.executablePath(),
+          headless: chromium.headless,
+        });
+
+        const page = await browser.newPage();
+        await page.goto(post.link, { waitUntil: "domcontentloaded", timeout: 30000 });
+        const content = await page.content();
+        await browser.close();
+
+        const $ = cheerio.load(content);
+        const text = $("body").text();
+
+        const codeMatch = text.match(/([A-Z0-9]{8,})/g);
+        const dateMatch = text.match(/(\d{4}\.\d{1,2}\.\d{1,2}|\d{4}-\d{1,2}-\d{1,2}|~\s*\d{1,2}\/\d{1,2})/g);
+
+        couponDetails.push({
+          title: post.title,
+          link: post.link,
+          code: codeMatch ? codeMatch.join(", ") : "❌ 쿠폰번호 없음",
+          period: dateMatch ? dateMatch.join(", ") : "❌ 유효기간 없음",
+        });
+      } catch (err) {
+        console.error("❌ 쿠폰 본문 분석 오류:", err);
+      }
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0xffc107)
+      .setTitle("🎟️ 현재 사용 가능한 쿠폰 목록")
+      .setDescription(
+        couponDetails
+          .map(
+            (c) =>
+              `**[${c.title}](${c.link})**\n` +
+              `> 🔢 쿠폰번호: \`${c.code}\`\n> ⏰ 기간: ${c.period}`
+          )
+          .join("\n\n")
+      )
+      .setFooter({ text: "※ 쿠폰 정보는 네이버 카페 게시글을 기준으로 자동 수집됩니다." });
+
+    return m.reply({ embeds: [embed] });
+  }
 });
 
 // --------------------- Ready ---------------------
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  checkNewPosts(); // 시작 시 한 번 실행
+  checkNewPosts();
 });
 
 client.login(TOKEN);
