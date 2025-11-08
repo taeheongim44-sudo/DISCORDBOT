@@ -4,7 +4,7 @@ import * as cheerio from "cheerio";
 import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
 
-// --------------------- 기본설정 ---------------------
+// --------------------- 설정 ---------------------
 const TOKEN = process.env.TOKEN;
 if (!TOKEN) {
   console.error("❌ ERROR: .env에 TOKEN 변수가 없습니다.");
@@ -29,31 +29,23 @@ const app = express();
 app.get("/", (req, res) => res.send("✅ Trickcal 디스코드 봇 작동중"));
 app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 
-// --------------------- Cheerio 크롤러 ---------------------
+// --------------------- 크롤러 ---------------------
 async function fetchLatestPosts(url) {
   try {
-    // 모바일 카페 URL 형태로 접근 (비로그인 가능)
-    const mobileUrl = url.replace("https://cafe.naver.com", "https://m.cafe.naver.com");
-
-    const res = await fetch(mobileUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)",
-      },
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
     });
-
     const html = await res.text();
     const $ = cheerio.load(html);
 
     const posts = [];
-    $("a").each((i, el) => {
-      const href = $(el).attr("href");
+    $("a[href*='/ArticleRead.nhn'], a[href*='/articles/']").each((i, el) => {
       const title = $(el).text().trim();
-      if (href && href.includes("/ArticleRead.nhn") && title.length > 5) {
+      const href = $(el).attr("href");
+      if (title && href) {
         posts.push({
           title,
-          link: href.startsWith("http")
-            ? href
-            : `https://m.cafe.naver.com${href}`,
+          link: href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`,
         });
       }
     });
@@ -100,7 +92,7 @@ async function checkNewPosts() {
   }
 }
 
-setInterval(checkNewPosts, 5 * 60 * 1000); // 5분마다 새글 확인
+setInterval(checkNewPosts, 5 * 60 * 1000); // 5분마다 확인
 
 // --------------------- 명령어 ---------------------
 client.on("messageCreate", async (m) => {
@@ -120,9 +112,7 @@ client.on("messageCreate", async (m) => {
     const embed = new EmbedBuilder()
       .setColor(isCoupon ? 0x00ff99 : 0x00bfff)
       .setTitle(isCoupon ? "🎁 최신 쿠폰 공지" : "📢 최신 업데이트 공지")
-      .setDescription(
-        posts.map((p) => `• [${p.title}](${p.link})`).join("\n\n")
-      );
+      .setDescription(posts.map((p) => `• [${p.title}](${p.link})`).join("\n\n"));
     return m.reply({ embeds: [embed] });
   }
 
@@ -144,7 +134,7 @@ client.on("messageCreate", async (m) => {
 // --------------------- Ready ---------------------
 client.once("ready", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  checkNewPosts();
+  checkNewPosts(); // 시작 시 한 번 실행
 });
 
 client.login(TOKEN);
