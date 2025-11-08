@@ -12,6 +12,7 @@
     "node-fetch": "^3.3.2",
     "cheerio": "^1.0.0-rc.12",
     "puppeteer-core": "^24.1.1",
-    "@sparticuz/chromium": "^126.0.0"
+    "@sparticuz/chromium": "^126.0.0",
+    "google-tts-api": "^2.0.2"
   }
 }
