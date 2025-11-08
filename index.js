@@ -15,7 +15,6 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
   ],
 });
@@ -38,11 +37,11 @@ async function openBrowser() {
         "--no-zygote",
         "--single-process",
       ],
-      executablePath: process.env.CHROME_PATH || (await chromium.executablePath()),
+      executablePath: process.env.CHROME_PATH || await chromium.executablePath(),
     });
     return browser;
   } catch (err) {
-    console.error("Puppeteer 실행 오류 (openBrowser):", err);
+    console.error("Puppeteer 실행 오류:", err);
     throw err;
   }
 }
@@ -138,7 +137,6 @@ async function getCouponList() {
       const p = posts[i];
       const preview = await fetchPostPreview(p.href);
       const combined = `${p.title}\n${preview}`;
-
       const codeMatches = combined.match(/\b[A-Za-z0-9]{5,20}\b/g) || [];
       const dateMatches = combined.match(/\b\d{1,4}[./]\d{1,2}[./]?\d{0,4}\b/g) || [];
       const codesFiltered = codeMatches.filter((c) => /[A-Za-z]/.test(c) || c.length >= 6);
@@ -241,7 +239,9 @@ client.on("messageCreate", async (m) => {
     if (coupons.length === 0) return m.reply("쿠폰을 불러올 수 없습니다.");
     const embed = new EmbedBuilder()
       .setTitle("🎫 사용 가능한 쿠폰 목록")
-      .setDescription(coupons.map((c) => `**${c.code}** — ${c.expires}\n${c.title}`).join("\n\n"))
+      .setDescription(
+        coupons.map((c) => `**${c.code}** — ${c.expires}\n${c.title}`).join("\n\n")
+      )
       .setColor(0xffcc00);
     return m.reply({ embeds: [embed] });
   }
@@ -264,7 +264,9 @@ client.on("messageCreate", async (m) => {
 
 // --------------------- 새 멤버 환영 ---------------------
 client.on("guildMemberAdd", async (member) => {
-  const ch = member.guild.systemChannel || member.guild.channels.cache.find((c) => c.name === "일반");
+  const ch =
+    member.guild.systemChannel ||
+    member.guild.channels.cache.find((c) => c.name === "일반");
   if (ch && ch.isTextBased()) {
     const embed = new EmbedBuilder()
       .setColor(0x00ffcc)
@@ -277,25 +279,7 @@ client.on("guildMemberAdd", async (member) => {
 // --------------------- Ready ---------------------
 client.once("ready", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 자동 체크
+  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 체크
 });
 
 client.login(TOKEN);
-json
-{
-  "name": "discord-bot",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "discord.js": "^14.24.2",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "node-fetch": "^3.3.2",
-    "cheerio": "^1.0.0-rc.12",
-    "puppeteer-core": "^24.1.1",
-    "@sparticuz/chromium": "^126.0.0"
-  }
-}
