@@ -35,16 +35,27 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 async function fetchLatestPosts(url) {
   let browser;
   try {
-browser = await puppeteer.launch({
-  args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox"],
-  defaultViewport: chromium.defaultViewport,
-  executablePath: await chromium.executablePath(),
-  headless: "new", // 안정적인 모드
-});
+    const executablePath = await chromium.executablePath();
+    console.log("🧩 Chromium 실행 경로:", executablePath);
+
+    browser = await puppeteer.launch({
+      args: [
+        ...chromium.args,
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--single-process",
+        "--no-zygote",
+      ],
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: "new", // Render에서 안정적인 모드
+    });
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
+    // 잠시 대기 (렌더링 안정화)
     await page.waitForTimeout(2000);
 
     const posts = await page.evaluate(() => {
@@ -65,10 +76,15 @@ browser = await puppeteer.launch({
     console.error("❌ Puppeteer 크롤링 오류:", err);
     return [];
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (e) {
+        console.warn("⚠️ 브라우저 종료 중 경고:", e.message);
+      }
+    }
   }
 }
-
 let lastUpdateTitle = "";
 let lastCouponTitle = "";
 
