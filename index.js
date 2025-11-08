@@ -29,7 +29,13 @@ app.listen(3000, () => console.log("🌐 Keep-alive server running on port 3000"
 
 async function fetchLatestPosts(url) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ko,en;q=0.9",
+      },
+    });
     const html = await res.text();
     const $ = cheerio.load(html);
 
@@ -40,9 +46,7 @@ async function fetchLatestPosts(url) {
       if (href && href.includes("/articles/") && title) {
         posts.push({
           title,
-          link: href.startsWith("http")
-            ? href
-            : `https://m.cafe.naver.com${href}`,
+          link: href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`,
         });
       }
     });
