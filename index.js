@@ -167,51 +167,47 @@ client.on("messageCreate", async (m) => {
     if (posts.length === 0) return m.reply("쿠폰 게시글을 불러올 수 없습니다 😢");
 
     const couponDetails = [];
+
     for (const post of posts) {
       try {
-        const couponDetails = [];
-for (const post of posts) {
-  try {
-    const executablePath = await chromium.executablePath();
-    const browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--single-process",
-        "--no-zygote",
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath,
-      headless: chromium.headless,
-    });
+        const executablePath = await chromium.executablePath();
+        const browser = await puppeteer.launch({
+          args: [
+            ...chromium.args,
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--single-process",
+            "--no-zygote",
+          ],
+          defaultViewport: chromium.defaultViewport,
+          executablePath,
+          headless: chromium.headless,
+        });
 
-    const page = await browser.newPage();
-    await page.goto(post.link, { waitUntil: "networkidle2", timeout: 60000 });
+        const page = await browser.newPage();
+        await page.goto(post.link, { waitUntil: "networkidle2", timeout: 60000 });
+        const text = await page.evaluate(() => document.body.innerText);
+        await browser.close();
 
-    // ✅ 페이지 안에서 실제로 렌더링된 텍스트를 가져오기
-    const text = await page.evaluate(() => document.body.innerText);
-    await browser.close();
+        // ✅ 쿠폰코드 패턴
+        const codeMatch = text.match(/\b[A-Z0-9]{8,20}\b/g);
 
-    // ✅ 쿠폰코드 패턴 (영문대문자+숫자 8~20자리)
-    const codeMatch = text.match(/\b[A-Z0-9]{8,20}\b/g);
+        // ✅ 기간 패턴
+        const dateMatch = text.match(
+          /(\d{4}[.-]\d{1,2}[.-]\d{1,2}|~\s*\d{1,2}[./]\d{1,2}|\d{2}[.]\d{1,2}[.]\d{1,2}|~\s*\d{1,2}월?\s*\d{1,2}일?)/g
+        );
 
-    // ✅ 날짜, 기간 패턴 (예: 2025.11.15, ~11/15, 25.10.01~10.15 등)
-    const dateMatch = text.match(
-      /(\d{4}[.-]\d{1,2}[.-]\d{1,2}|~\s*\d{1,2}[./]\d{1,2}|\d{2}[.]\d{1,2}[.]\d{1,2}|~\s*\d{1,2}월?\s*\d{1,2}일?)/g
-    );
-
-    couponDetails.push({
-      title: post.title,
-      link: post.link,
-      code: codeMatch ? codeMatch.join(", ") : "❌ 쿠폰번호 없음",
-      period: dateMatch ? dateMatch.join(", ") : "❌ 유효기간 없음",
-    });
-  } catch (err) {
-    console.error("❌ 쿠폰 본문 분석 오류:", err);
-  }
-}
+        couponDetails.push({
+          title: post.title,
+          link: post.link,
+          code: codeMatch ? codeMatch.join(", ") : "❌ 쿠폰번호 없음",
+          period: dateMatch ? dateMatch.join(", ") : "❌ 유효기간 없음",
+        });
+      } catch (err) {
+        console.error("❌ 쿠폰 본문 분석 오류:", err);
+      }
+    }
 
     const embed = new EmbedBuilder()
       .setColor(0xffc107)
