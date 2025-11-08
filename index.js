@@ -32,17 +32,23 @@ app.listen(3000, () => console.log("🌐 Keep-alive 서버 실행됨"));
 // --------------------- Cheerio 크롤러 ---------------------
 async function fetchLatestPosts(url) {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    // 모바일 카페 URL 형태로 접근 (비로그인 가능)
+    const mobileUrl = url.replace("https://cafe.naver.com", "https://m.cafe.naver.com");
+
+    const res = await fetch(mobileUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)",
+      },
     });
+
     const html = await res.text();
     const $ = cheerio.load(html);
 
     const posts = [];
-    $("a[href*='/ArticleRead.nhn']").each((i, el) => {
-      const title = $(el).text().trim();
+    $("a").each((i, el) => {
       const href = $(el).attr("href");
-      if (title && href) {
+      const title = $(el).text().trim();
+      if (href && href.includes("/ArticleRead.nhn") && title.length > 5) {
         posts.push({
           title,
           link: href.startsWith("http")
