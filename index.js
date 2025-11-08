@@ -282,4 +282,16 @@ client.once("ready", () => {
   setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 체크
 });
 
+import express from "express";
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("🌐 Keep-alive 서버 실행됨\n✅ 버터의옐로카드(노예) 정상 동작 중!");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Keep-alive 서버 실행됨 (포트: ${PORT})`);
+});
+
 client.login(TOKEN);
