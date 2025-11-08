@@ -2,15 +2,6 @@ import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
 import "dotenv/config";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
-import googleTTS from "google-tts-api";
-import fetch from "node-fetch";
-import {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-} from "@discordjs/voice";
-import { Readable } from "stream";
 
 // --------------------- 기본설정 ---------------------
 const TOKEN = process.env.TOKEN;
@@ -31,49 +22,14 @@ const client = new Client({
 
 const PREFIX = "!";
 const NOTICE_CHANNEL_NAME = "트릭컬공지";
-const UPDATE_URL =
-  "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
-const COUPON_URL =
-  "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
-
-// --------------------- TTS ---------------------
-async function streamFromUrl(url) {
-  const res = await fetch(url, {
-    headers: { Referer: "https://translate.google.com" },
-  });
-  const arrayBuffer = await res.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  return Readable.from(buffer);
-}
-
-async function playTTSInConnection(voiceChannel, text) {
-  try {
-    const ttsUrl = googleTTS.getAudioUrl(text, {
-      lang: "ko",
-      slow: false,
-    });
-    const stream = await streamFromUrl(ttsUrl);
-    const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: voiceChannel.guild.id,
-      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    });
-    const player = createAudioPlayer();
-    const resource = createAudioResource(stream);
-    player.play(resource);
-    connection.subscribe(player);
-    player.on(AudioPlayerStatus.Idle, () => connection.destroy());
-  } catch (err) {
-    console.error("TTS 오류:", err);
-  }
-}
+const UPDATE_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/67";
+const COUPON_URL = "https://m.cafe.naver.com/ca-fe/web/cafes/30131231/menus/85";
 
 // --------------------- Puppeteer ---------------------
-// ✅ Render 환경에서 동작하도록 launch 옵션 강화 + 로그 추가
 async function openBrowser() {
   try {
     const browser = await puppeteer.launch({
-      headless: "new", // puppeteer 최신 권장값, 안 되면 true로 바꿔도 OK
+      headless: "new",
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -82,8 +38,7 @@ async function openBrowser() {
         "--no-zygote",
         "--single-process",
       ],
-      // Docker 등에서 직접 chromium 설치했으면 CHROME_PATH 지정
-      executablePath: process.env.CHROME_PATH || undefined,
+      executablePath: process.env.CHROME_PATH || (await chromium.executablePath()),
     });
     return browser;
   } catch (err) {
@@ -92,19 +47,13 @@ async function openBrowser() {
   }
 }
 
-// ✅ 에러 캐치 + 로그 추가
 async function fetchPostsFromMenu(menuUrl) {
   let browser;
   try {
     browser = await openBrowser();
     const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
-    );
-    await page.goto(menuUrl, {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
+    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
+    await page.goto(menuUrl, { waitUntil: "networkidle2", timeout: 60000 });
 
     const posts = await page.$$eval("a", (anchors) => {
       const results = [];
@@ -112,7 +61,6 @@ async function fetchPostsFromMenu(menuUrl) {
         const href = a.getAttribute("href") || "";
         const text = (a.innerText || "").trim();
         if (!text) continue;
-        // 필요하면 여기를 실제 구조에 맞게 튜닝
         if (href.includes("ArticleRead") || href.includes("article")) {
           results.push({ title: text, href });
         }
@@ -120,9 +68,7 @@ async function fetchPostsFromMenu(menuUrl) {
       return results;
     });
 
-    console.log(
-      `[fetchPostsFromMenu] ${menuUrl} 에서 ${posts.length}개 링크 탐색`
-    );
+    console.log(`[fetchPostsFromMenu] ${menuUrl} 에서 ${posts.length}개 링크 탐색`);
     return posts;
   } catch (err) {
     console.error("fetchPostsFromMenu 에러:", err);
@@ -137,16 +83,9 @@ async function fetchPostPreview(href) {
   try {
     browser = await openBrowser();
     const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
-    );
-    const url = href.startsWith("http")
-      ? href
-      : `https://m.cafe.naver.com${href}`;
-    await page.goto(url, {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
+    await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)");
+    const url = href.startsWith("http") ? href : `https://m.cafe.naver.com${href}`;
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
     const preview = await page.evaluate(() => {
       const el =
@@ -178,14 +117,10 @@ async function getLatestPost(type) {
       console.warn(`[getLatestPost] ${type} 게시글 없음`);
       return null;
     }
-    const filtered = posts.filter(
-      (p) => !p.title.includes("공지") && !p.title.includes("안내")
-    );
+    const filtered = posts.filter((p) => !p.title.includes("공지") && !p.title.includes("안내"));
     const target = filtered.length > 0 ? filtered[0] : posts[0];
     const preview = await fetchPostPreview(target.href);
-    const link = target.href.startsWith("http")
-      ? target.href
-      : `https://m.cafe.naver.com${target.href}`;
+    const link = target.href.startsWith("http") ? target.href : `https://m.cafe.naver.com${target.href}`;
     return { title: target.title, link, preview };
   } catch (err) {
     console.error("getLatestPost 에러:", err);
@@ -204,28 +139,20 @@ async function getCouponList() {
       const preview = await fetchPostPreview(p.href);
       const combined = `${p.title}\n${preview}`;
 
-      const codeMatches =
-        combined.match(/\b[A-Za-z0-9]{5,20}\b/g) || [];
-      const dateMatches =
-        combined.match(/\b\d{1,4}[./]\d{1,2}[./]?\d{0,4}\b/g) || [];
-      const codesFiltered = codeMatches.filter(
-        (c) => /[A-Za-z]/.test(c) || c.length >= 6
-      );
+      const codeMatches = combined.match(/\b[A-Za-z0-9]{5,20}\b/g) || [];
+      const dateMatches = combined.match(/\b\d{1,4}[./]\d{1,2}[./]?\d{0,4}\b/g) || [];
+      const codesFiltered = codeMatches.filter((c) => /[A-Za-z]/.test(c) || c.length >= 6);
 
       if (codesFiltered.length > 0) {
         coupons.push({
           code: codesFiltered[0],
           expires: dateMatches[0] || "유효기간 없음",
           title: p.title,
-          link: p.href.startsWith("http")
-            ? p.href
-            : `https://m.cafe.naver.com${p.href}`,
+          link: p.href.startsWith("http") ? p.href : `https://m.cafe.naver.com${p.href}`,
         });
       }
     }
-    console.log(
-      `[getCouponList] 쿠폰 후보 ${coupons.length}개`
-    );
+    console.log(`[getCouponList] 쿠폰 후보 ${coupons.length}개`);
     return coupons;
   } catch (err) {
     console.error("getCouponList 에러:", err);
@@ -234,7 +161,6 @@ async function getCouponList() {
 }
 
 // --------------------- 스케줄 ---------------------
-// ✅ 스케줄 내에서 에러 나도 전체 봇이 죽지 않도록 try/catch
 async function doScheduledChecks() {
   try {
     const now = new Date();
@@ -245,19 +171,14 @@ async function doScheduledChecks() {
     // 업데이트: 수요일 17시
     if (day === 3 && hour === 17) {
       for (const g of client.guilds.cache.values()) {
-        const ch = g.channels.cache.find(
-          (c) =>
-            c.name === NOTICE_CHANNEL_NAME && c.isTextBased()
-        );
+        const ch = g.channels.cache.find((c) => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
         if (!ch) continue;
         const post = await getLatestPost("update");
         if (!post) continue;
         const embed = new EmbedBuilder()
           .setColor(0x00bfff)
           .setTitle("⚙️ 트릭컬 리바이브 업데이트")
-          .setDescription(
-            `**${post.title}**\n\n${post.preview}`
-          )
+          .setDescription(`**${post.title}**\n\n${post.preview}`)
           .setURL(post.link);
         await ch.send({ embeds: [embed] });
       }
@@ -266,29 +187,20 @@ async function doScheduledChecks() {
     // 쿠폰: 3일마다 12시
     if (hour === 12 && date % 3 === 0) {
       for (const g of client.guilds.cache.values()) {
-        const ch = g.channels.cache.find(
-          (c) =>
-            c.name === NOTICE_CHANNEL_NAME && c.isTextBased()
-        );
+        const ch = g.channels.cache.find((c) => c.name === NOTICE_CHANNEL_NAME && c.isTextBased());
         if (!ch) continue;
         const post = await getLatestPost("coupon");
         if (!post) continue;
         const embed = new EmbedBuilder()
           .setColor(0x00ff99)
           .setTitle("🎁 트릭컬 리바이브 쿠폰")
-          .setDescription(
-            `**${post.title}**\n\n${post.preview}`
-          )
+          .setDescription(`**${post.title}**\n\n${post.preview}`)
           .setURL(post.link);
         await ch.send({ embeds: [embed] });
 
         const coupons = await getCouponList();
         if (coupons.length > 0) {
-          const text = coupons
-            .map(
-              (c) => `▫️ **${c.code}** — ${c.expires}`
-            )
-            .join("\n");
+          const text = coupons.map((c) => `▫️ **${c.code}** — ${c.expires}`).join("\n");
           await ch.send({
             embeds: [
               new EmbedBuilder()
@@ -309,13 +221,6 @@ async function doScheduledChecks() {
 client.on("messageCreate", async (m) => {
   if (m.author.bot) return;
   const content = m.content.trim();
-
-  // TTS
-  if (m.channel.name === "tts" && !content.startsWith("~")) {
-    const vc = m.member?.voice?.channel;
-    if (vc) playTTSInConnection(vc, content);
-  }
-
   if (!content.startsWith(PREFIX)) return;
   const [cmd, arg] = content.slice(1).split(" ");
 
@@ -325,30 +230,18 @@ client.on("messageCreate", async (m) => {
     if (!post) return m.reply("불러올 수 없습니다.");
     const embed = new EmbedBuilder()
       .setColor(type === "update" ? 0x00bfff : 0x00ff99)
-      .setTitle(
-        type === "update" ? "📢 최신 업데이트" : "🎁 최신 쿠폰"
-      )
-      .setDescription(
-        `**${post.title}**\n\n${post.preview}`
-      )
+      .setTitle(type === "update" ? "📢 최신 업데이트" : "🎁 최신 쿠폰")
+      .setDescription(`**${post.title}**\n\n${post.preview}`)
       .setURL(post.link);
     return m.reply({ embeds: [embed] });
   }
 
   if (cmd === "쿠폰목록") {
     const coupons = await getCouponList();
-    if (coupons.length === 0)
-      return m.reply("쿠폰을 불러올 수 없습니다.");
+    if (coupons.length === 0) return m.reply("쿠폰을 불러올 수 없습니다.");
     const embed = new EmbedBuilder()
       .setTitle("🎫 사용 가능한 쿠폰 목록")
-      .setDescription(
-        coupons
-          .map(
-            (c) =>
-              `**${c.code}** — ${c.expires}\n${c.title}`
-          )
-          .join("\n\n")
-      )
+      .setDescription(coupons.map((c) => `**${c.code}** — ${c.expires}\n${c.title}`).join("\n\n"))
       .setColor(0xffcc00);
     return m.reply({ embeds: [embed] });
   }
@@ -371,20 +264,12 @@ client.on("messageCreate", async (m) => {
 
 // --------------------- 새 멤버 환영 ---------------------
 client.on("guildMemberAdd", async (member) => {
-  const ch =
-    member.guild.systemChannel ||
-    member.guild.channels.cache.find(
-      (c) => c.name === "일반"
-    );
+  const ch = member.guild.systemChannel || member.guild.channels.cache.find((c) => c.name === "일반");
   if (ch && ch.isTextBased()) {
     const embed = new EmbedBuilder()
       .setColor(0x00ffcc)
-      .setTitle(
-        "안녕하세요!! 버터의옐로카드에 오신걸 환영합니다!! !명령어로 시작해보세요"
-      )
-      .setDescription(
-        `환영합니다, ${member.user.username}님! 즐거운 시간 되세요 🎉`
-      );
+      .setTitle("안녕하세요!! 버터의옐로카드에 오신걸 환영합니다!! !명령어로 시작해보세요")
+      .setDescription(`환영합니다, ${member.user.username}님! 즐거운 시간 되세요 🎉`);
     await ch.send({ embeds: [embed] });
   }
 });
@@ -392,8 +277,27 @@ client.on("guildMemberAdd", async (member) => {
 // --------------------- Ready ---------------------
 client.once("ready", () => {
   console.log(`✅ ${client.user.tag} 실행됨`);
-  // 1시간마다 체크
-  setInterval(doScheduledChecks, 1000 * 60 * 60);
+  setInterval(doScheduledChecks, 1000 * 60 * 60); // 1시간마다 자동 체크
 });
 
 client.login(TOKEN);
+✅ package.json은 이렇게 유지
+json
+코드 복사
+{
+  "name": "discord-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.24.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "cheerio": "^1.0.0-rc.12",
+    "puppeteer-core": "^24.1.1",
+    "@sparticuz/chromium": "^126.0.0"
+  }
+}
